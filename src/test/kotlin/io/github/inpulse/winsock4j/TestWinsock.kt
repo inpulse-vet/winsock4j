@@ -4,11 +4,34 @@ import io.github.inpulse.io.github.inpulse.winsock4j.GUID
 import io.github.inpulse.io.github.inpulse.winsock4j.SOCKADDR_BTH
 import io.github.inpulse.io.github.inpulse.winsock4j.WSADATA
 import io.github.inpulse.io.github.inpulse.winsock4j.Winsock2
+import io.github.inpulse.io.github.inpulse.winsock4j.Winsock2.SPP_UUID
 import java.lang.foreign.Arena
-import java.lang.foreign.ValueLayout
 import kotlin.test.Test
+import kotlin.test.assertEquals
+import kotlin.uuid.ExperimentalUuidApi
 
+@OptIn(ExperimentalUuidApi::class)
 class TestWinsock {
+
+    @Test
+    fun testGuidSet() {
+        Arena.ofConfined().use { arena ->
+            val guid = GUID.allocate(arena)
+            guid.setFromUuid(SPP_UUID)
+
+            assertEquals(0x00001101 ,guid.Data1, "Data1 does not match")
+            assertEquals(0x0000 ,guid.Data2, "Data2 does not match")
+            assertEquals(0x1000 ,guid.Data3, "Data3 does not match")
+            assertEquals(0x80.toByte() ,guid.Data4[0], "Data4 does not match")
+            assertEquals(0x00.toByte() ,guid.Data4[1], "Data4 does not match")
+            assertEquals(0x00.toByte() ,guid.Data4[2], "Data4 does not match")
+            assertEquals(0x80.toByte() ,guid.Data4[3], "Data4 does not match")
+            assertEquals(0x5f.toByte() ,guid.Data4[4], "Data4 does not match")
+            assertEquals(0x9b.toByte() ,guid.Data4[5], "Data4 does not match")
+            assertEquals(0x34.toByte() ,guid.Data4[6], "Data4 does not match")
+            assertEquals(0xfb.toByte() ,guid.Data4[7], "Data4 does not match")
+        }
+    }
 
     @Test
     fun startup() {
@@ -16,13 +39,11 @@ class TestWinsock {
             val wsaData = WSADATA.allocate(arena)
             val version = 0x0202.toUShort()
             val ret = Winsock2.WSAStartup(version, wsaData)
-            println(ret)
+            println("WSAStartup: $ret")
             println(wsaData.wVersion)
             println(wsaData.wHighVersion)
             println(wsaData.szDescription)
             println(wsaData.szSystemStatus)
-
-            println(wsaData)
 
             val socket = Winsock2.socket(
                 Winsock2.AF_BTH,
@@ -34,18 +55,17 @@ class TestWinsock {
             }
 
             val guid = GUID.allocate(arena)
-            guid.Data1 = 2
-            guid.Data2 = 4
-            guid.Data3 = 8
-            guid.Data4 = byteArrayOf(1, 2, 3, 4, 5, 6, 7, 8)
+            guid.setFromUuid(Winsock2.SPP_UUID)
+
+            // monitor mac 88:6b:0f:ad:b9:5b
+            // monitor mac 00:81:f9:19:40:2a
+            // incardio x mac 30:c9:22:16:09:3a
 
             val sockaddr = SOCKADDR_BTH.allocate(arena)
             sockaddr.addressFamily = Winsock2.AF_BTH.toShort()
-            sockaddr.btAddr = 0xAFADADADADADAD
+            sockaddr.btAddr = Winsock2.btAddrFromString("00:81:f9:19:40:2a")
             sockaddr.port = 0
             sockaddr.serviceClassId = guid
-            val a = sockaddr.serviceClassId.Data1
-            println("guid Data1: $a")
 
             val connectRes = Winsock2.connect(socket, sockaddr.pointer, SOCKADDR_BTH.LAYOUT.byteSize().toInt())
             if (connectRes != 0) {

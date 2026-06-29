@@ -1,15 +1,14 @@
 package io.github.inpulse.io.github.inpulse.winsock4j
 
-import io.github.inpulse.io.github.inpulse.winsock4j.GUID.Companion.data4Offset
 import java.lang.foreign.Arena
 import java.lang.foreign.FunctionDescriptor
 import java.lang.foreign.Linker
 import java.lang.foreign.MemoryLayout
 import java.lang.foreign.MemorySegment
-import java.lang.foreign.StructLayout
 import java.lang.foreign.SymbolLookup
 import java.lang.foreign.ValueLayout
-import java.lang.invoke.MethodHandles
+import kotlin.uuid.ExperimentalUuidApi
+import kotlin.uuid.Uuid
 
 data class GUID(val pointer: MemorySegment) {
 
@@ -79,21 +78,66 @@ data class GUID(val pointer: MemorySegment) {
                 8
             )
         }
+
+    @OptIn(ExperimentalUuidApi::class)
+    fun setFromUuid(uuid: Uuid) {
+        uuid.toLongs { mostSignificantBits, leastSignificantBits ->
+            val d1 = (mostSignificantBits shr 32).toInt()
+            val d2 = (mostSignificantBits shr 16 and 0xFFFF).toShort()
+            val d3 = (mostSignificantBits and 0xFFFF).toShort()
+
+            val d4a = leastSignificantBits shr 56 and 0xFF
+            val d4b = leastSignificantBits shr 48 and 0xFF
+            val d4c = leastSignificantBits shr 40 and 0xFF
+            val d4d = leastSignificantBits shr 32 and 0xFF
+            val d4e = leastSignificantBits shr 24 and 0xFF
+            val d4f = leastSignificantBits shr 16 and 0xFF
+            val d4g = leastSignificantBits shr 8 and 0xFF
+            val d4h = leastSignificantBits shr 0 and 0xFF
+
+            Data1 = d1
+            Data2 = d2
+            Data3 = d3
+            Data4 = byteArrayOf(
+                d4a.toByte(),
+                d4b.toByte(),
+                d4c.toByte(),
+                d4d.toByte(),
+                d4e.toByte(),
+                d4f.toByte(),
+                d4g.toByte(),
+                d4h.toByte(),
+            )
+        }
+    }
 }
 
 data class SOCKADDR_BTH(val pointer: MemorySegment) {
 
     companion object {
+        // SOCKADDR_BTH is declared with #pragma pack(push, 1) in ws2bth.h — byte-packed, no padding.
+        // Field offsets: addressFamily=0, btAddr=2, serviceClassId=10, port=26. Total=30 bytes.
+        //
+        // Rule: for each field whose natural type-alignment exceeds its actual offset alignment,
+        // use withByteAlignment(n) where n is the largest power-of-2 that divides the actual offset.
+        //   btAddr  (JAVA_LONG, natural align 8) at offset  2: withByteAlignment(2)
+        //   port    (JAVA_INT,  natural align 4) at offset 26: withByteAlignment(2)
+        //
+        // GUID.LAYOUT cannot be embedded directly: even with withByteAlignment(1) on the group,
+        // the group's internal JAVA_INT VarHandle (Data1) still requires a 4-byte-aligned segment
+        // address at runtime. At offset 10 the address is only 2-byte aligned, causing
+        // IllegalStateException on first access. Solution: use a 16-byte sequence as the wire
+        // representation and copy into/out of a properly aligned GUID allocation on access.
         val LAYOUT = MemoryLayout.structLayout(
-            ValueLayout.JAVA_SHORT.withName("addressFamily"),
-            ValueLayout.JAVA_LONG.withName("btAddr").withByteAlignment(2),
-            GUID.LAYOUT.withName("serviceClassId").withByteAlignment(1),
-            ValueLayout.JAVA_INT.withName("port"),
-        )
+            ValueLayout.JAVA_SHORT.withName("addressFamily"),                                      // offset  0, size  2
+            ValueLayout.JAVA_LONG.withByteAlignment(2).withName("btAddr"),                         // offset  2, size  8
+            MemoryLayout.sequenceLayout(16, ValueLayout.JAVA_BYTE).withName("serviceClassId"),     // offset 10, size 16
+            ValueLayout.JAVA_INT.withByteAlignment(2).withName("port"),                            // offset 26, size  4
+        ).withName("SOCKADDR_BTH")
 
         val addressFamilyHandle = LAYOUT.varHandle(MemoryLayout.PathElement.groupElement("addressFamily"))
         val btAddrHandle = LAYOUT.varHandle(MemoryLayout.PathElement.groupElement("btAddr"))
-        val serviceClassIdHandle = LAYOUT.byteOffset(MemoryLayout.PathElement.groupElement("serviceClassId"))
+        val serviceClassIdOffset = LAYOUT.byteOffset(MemoryLayout.PathElement.groupElement("serviceClassId"))
         val portHandle = LAYOUT.varHandle(MemoryLayout.PathElement.groupElement("port"))
 
         fun allocate(arena: Arena): SOCKADDR_BTH {
@@ -102,52 +146,37 @@ data class SOCKADDR_BTH(val pointer: MemorySegment) {
         }
 
         init {
-            val size = SOCKADDR_BTH.LAYOUT.byteSize()
-            assert(size == 30L) {
-                "SOCKADDR_BTH must be 30 bytes, is $size"
+            check(LAYOUT.byteSize() == 30L) {
+                "SOCKADDR_BTH must be 30 bytes, is ${LAYOUT.byteSize()}"
             }
         }
     }
 
     var addressFamily: Short
-        get() {
-            return addressFamilyHandle.get(pointer, 0L) as Short
-        }
-        set(value) {
-            addressFamilyHandle.set(pointer, 0L, value)
-        }
+        get() = addressFamilyHandle.get(pointer, 0L) as Short
+        set(value) { addressFamilyHandle.set(pointer, 0L, value) }
 
     var btAddr: Long
-        get() {
-            return btAddrHandle.get(pointer, 0L) as Long
-        }
-        set(value) {
-            btAddrHandle.set(pointer, 0L, value)
-        }
+        get() = btAddrHandle.get(pointer, 0L) as Long
+        set(value) { btAddrHandle.set(pointer, 0L, value) }
 
+    // The 16 GUID bytes in the packed struct sit at a 2-byte-aligned address (offset 10).
+    // We copy them into a fresh, naturally-aligned allocation so that GUID's internal
+    // JAVA_INT VarHandle (Data1 at offset 0) sees a 4-byte-aligned base address.
     var serviceClassId: GUID
         get() {
-            val guidPtr = pointer.asSlice(serviceClassIdHandle, GUID.LAYOUT.byteSize())
-            return GUID(guidPtr)
+            val guid = GUID.allocate(Arena.ofAuto())
+            MemorySegment.copy(pointer, serviceClassIdOffset, guid.pointer, 0L, GUID.LAYOUT.byteSize())
+            return guid
         }
         set(value) {
-            val guidPtr = pointer.asSlice(serviceClassIdHandle, GUID.LAYOUT.byteSize())
-            MemorySegment.copy(
-                value.pointer,
-                0L,
-                guidPtr,
-                0L,
-                GUID.LAYOUT.byteSize(),
-            )
+            MemorySegment.copy(value.pointer, 0L, pointer, serviceClassIdOffset, GUID.LAYOUT.byteSize())
         }
 
-    var port: Long
-        get() {
-            return portHandle.get(pointer, 0) as Long
-        }
-        set(value) {
-            portHandle.set(pointer, 0, value)
-        }
+    // ULONG (Windows 32-bit) → JAVA_INT VarHandle returns Int; use toUInt() if unsigned range needed.
+    var port: Int
+        get() = portHandle.get(pointer, 0L) as Int
+        set(value) { portHandle.set(pointer, 0L, value) }
 
 }
 
@@ -207,7 +236,10 @@ data class WSADATA(val pointer: MemorySegment) {
         }
 }
 
+@OptIn(ExperimentalUuidApi::class)
 object Winsock2 {
+
+    val SPP_UUID = Uuid.parse("00001101-0000-1000-8000-00805f9b34fb")
 
     const val INVALID_SOCKET = UInt.MAX_VALUE
 
@@ -323,6 +355,17 @@ object Winsock2 {
 
     fun connect(s: UInt, name: MemorySegment, namelen: Int): Int {
         return connectHandle(s.toInt(), name, namelen) as Int
+    }
+
+    fun btAddrFromString(string: String): Long {
+        val split = string.split(":")
+        require(split.size == 6)
+        var addr = 0L
+        for (s in split) {
+            val b = s.toLong(16)
+            addr = (addr shl 8) or b
+        }
+        return addr
     }
 
 }
