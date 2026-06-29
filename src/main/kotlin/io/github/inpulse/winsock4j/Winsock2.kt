@@ -244,10 +244,11 @@ object Winsock2 {
     const val INVALID_SOCKET = UInt.MAX_VALUE
 
     const val WSAEFAULT = 10014
+    const val WSAEINPROGRESS = 10036
+    const val WSAETIMEDOUT = 10060
+    const val WSAEPROCLIM = 10067
     const val WSASYSNOTREADY = 10091
     const val WSAVERNOTSUPPORTED = 10092
-    const val WSAEINPROGRESS = 10036
-    const val WSAEPROCLIM = 10067
 
     const val AF_UNSPEC = 0
     const val AF_INET = 2
@@ -271,6 +272,13 @@ object Winsock2 {
     const val IPPROTO_UDP = 17
     const val IPPROTO_ICMPV6 = 58
     const val IPPROTO_RM = 113
+
+    // Layout for the struct Panama fills immediately on JVM-to-Java transition,
+    // before the JVM can make any internal Windows API call that clobbers GetLastError.
+    private val capturedStateLayout = Linker.Option.captureStateLayout()
+    private val capturedLastErrorHandle = capturedStateLayout.varHandle(
+        MemoryLayout.PathElement.groupElement("GetLastError")
+    )
 
     private val arena = Arena.global()
     private val linker = Linker.nativeLinker()
@@ -350,11 +358,21 @@ object Winsock2 {
             ValueLayout.ADDRESS,
             ValueLayout.JAVA_INT,
         )
-        linker.downcallHandle(fn, fnDesc)
+        // captureCallState prepends a leading ADDRESS (the capture buffer) to every invocation.
+        // WSAGetLastError and GetLastError read the same Windows TLS slot, so "GetLastError"
+        // captures the Winsock error code atomically on JVM re-entry, before anything else runs.
+        linker.downcallHandle(fn, fnDesc, Linker.Option.captureCallState("GetLastError"))
     }
 
-    fun connect(s: UInt, name: MemorySegment, namelen: Int): Int {
-        return connectHandle(s.toInt(), name, namelen) as Int
+    // Returns Pair(connectResult, wsaLastError).
+    // connectResult == -1 on failure; wsaLastError is the Winsock error code (e.g. WSAECONNREFUSED).
+    fun connect(s: UInt, name: MemorySegment, namelen: Int): Pair<Int, Int> {
+        Arena.ofConfined().use { captureArena ->
+            val capturedState = captureArena.allocate(capturedStateLayout)
+            val ret = connectHandle(capturedState, s.toInt(), name, namelen) as Int
+            val wsaError = capturedLastErrorHandle.get(capturedState, 0L) as Int
+            return Pair(ret, wsaError)
+        }
     }
 
     fun btAddrFromString(string: String): Long {

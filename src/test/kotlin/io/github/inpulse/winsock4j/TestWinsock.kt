@@ -57,21 +57,28 @@ class TestWinsock {
             val guid = GUID.allocate(arena)
             guid.setFromUuid(Winsock2.SPP_UUID)
 
-            // monitor mac 88:6b:0f:ad:b9:5b
-            // monitor mac 00:81:f9:19:40:2a
-            // incardio x mac 30:c9:22:16:09:3a
+            // 68:0a:e2:52:b6:a8 INCARDIO
+            // 88:6b:0f:ad:b9:5b INMONITOR
+            // 00:81:f9:19:40:2a INMONITOR
+            // 88:6b:0f:ad:b9:b5 INMONITOR
+            // 30:c9:22:16:09:3a INcardio X
+            // 90:38:0c:fa:b7:42 INmonitor
 
             val sockaddr = SOCKADDR_BTH.allocate(arena)
             sockaddr.addressFamily = Winsock2.AF_BTH.toShort()
-            sockaddr.btAddr = Winsock2.btAddrFromString("00:81:f9:19:40:2a")
+            sockaddr.btAddr = Winsock2.btAddrFromString("90:38:0c:fa:b7:42")
             sockaddr.port = 0
             sockaddr.serviceClassId = guid
 
-            val connectRes = Winsock2.connect(socket, sockaddr.pointer, SOCKADDR_BTH.LAYOUT.byteSize().toInt())
+            val (connectRes, lastError) = Winsock2.connect(socket, sockaddr.pointer, SOCKADDR_BTH.LAYOUT.byteSize().toInt())
             if (connectRes != 0) {
-                val error = Winsock2.WSAGetLastError()
-                println("connect error: $error")
+//                val error = Winsock2.WSAGetLastError()
+                println("connect error: $lastError")
+            } else {
+                println("CONNECTED!")
             }
+
+            Thread.sleep(2000)
 
             val close = Winsock2.closesocket(socket)
             if (close != 0) {
