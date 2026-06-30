@@ -7,6 +7,7 @@ import java.lang.foreign.MemoryLayout
 import java.lang.foreign.MemorySegment
 import java.lang.foreign.SymbolLookup
 import java.lang.foreign.ValueLayout
+import java.nio.ByteOrder
 import kotlin.uuid.ExperimentalUuidApi
 import kotlin.uuid.Uuid
 
@@ -180,6 +181,57 @@ data class SOCKADDR_BTH(val pointer: MemorySegment) {
 
 }
 
+data class SOCKADDR_IN(val pointer: MemorySegment) {
+
+    companion object {
+        // sockaddr_in is naturally aligned (no #pragma pack), so no withByteAlignment is needed.
+        // Field offsets: sin_family=0, sin_port=2, sin_addr=4, sin_zero=8. Total=16 bytes.
+        //
+        // Byte order is the hazard here, not alignment: sin_port and sin_addr are in NETWORK
+        // byte order (big-endian) on the wire, while sin_family is host order. We encode this
+        // with .withOrder(BIG_ENDIAN) on the two network-order fields, so the Kotlin-facing
+        // properties accept ordinary host-order values and the VarHandle does the htons/htonl.
+        val LAYOUT = MemoryLayout.structLayout(
+            ValueLayout.JAVA_SHORT.withName("sin_family"),                                    // offset 0, size 2
+            ValueLayout.JAVA_SHORT.withOrder(ByteOrder.BIG_ENDIAN).withName("sin_port"),      // offset 2, size 2
+            ValueLayout.JAVA_INT.withOrder(ByteOrder.BIG_ENDIAN).withName("sin_addr"),        // offset 4, size 4
+            MemoryLayout.sequenceLayout(8, ValueLayout.JAVA_BYTE).withName("sin_zero"),       // offset 8, size 8
+        ).withName("SOCKADDR_IN")
+
+        val sinFamilyHandle = LAYOUT.varHandle(MemoryLayout.PathElement.groupElement("sin_family"))
+        val sinPortHandle = LAYOUT.varHandle(MemoryLayout.PathElement.groupElement("sin_port"))
+        val sinAddrHandle = LAYOUT.varHandle(MemoryLayout.PathElement.groupElement("sin_addr"))
+
+        fun allocate(arena: Arena): SOCKADDR_IN {
+            val pointer = arena.allocate(LAYOUT)
+            return SOCKADDR_IN(pointer)
+        }
+
+        init {
+            check(LAYOUT.byteSize() == 16L) {
+                "SOCKADDR_IN must be 16 bytes, is ${LAYOUT.byteSize()}"
+            }
+        }
+    }
+
+    var sinFamily: Short
+        get() = sinFamilyHandle.get(pointer, 0L) as Short
+        set(value) { sinFamilyHandle.set(pointer, 0L, value) }
+
+    // Host-order port in/out; the big-endian handle writes network byte order on the wire
+    // (e.g. 8080 -> bytes 1F 90).
+    var sinPort: Int
+        get() = (sinPortHandle.get(pointer, 0L) as Short).toUShort().toInt()
+        set(value) { sinPortHandle.set(pointer, 0L, value.toShort()) }
+
+    // Host-order IPv4 address in/out (e.g. 0x7F000001 for 127.0.0.1); the big-endian handle
+    // writes network byte order on the wire (bytes 7F 00 00 01). Build with ipv4AddrFromString.
+    var sinAddr: Int
+        get() = sinAddrHandle.get(pointer, 0L) as Int
+        set(value) { sinAddrHandle.set(pointer, 0L, value) }
+
+}
+
 data class WSADATA(val pointer: MemorySegment) {
 
     companion object {
@@ -284,13 +336,18 @@ object Winsock2 {
 
     private val arena = Arena.global()
     private val linker = Linker.nativeLinker()
-    private val css = Linker.Option.captureCallState("GetLastError")
+    // Lazy: the "GetLastError" capture name only exists on Windows. Evaluating it eagerly here
+    // would throw at class-init on non-Windows hosts (the capture-state struct exposes only
+    // "errno"), breaking pure-memory unit tests that merely reference this object. The downcall
+    // handles that consume css/capturedLastErrorHandle are themselves `by lazy`, so deferral is
+    // transparent — on Windows they are still bound before first use.
+    private val css by lazy { Linker.Option.captureCallState("GetLastError") }
     // Layout for the struct Panama fills immediately on JVM-to-Java transition,
     // before the JVM can make any internal Windows API call that clobbers GetLastError.
     private val capturedStateLayout = Linker.Option.captureStateLayout()
-    private val capturedLastErrorHandle = capturedStateLayout.varHandle(
-        MemoryLayout.PathElement.groupElement("GetLastError")
-    )
+    private val capturedLastErrorHandle by lazy {
+        capturedStateLayout.varHandle(MemoryLayout.PathElement.groupElement("GetLastError"))
+    }
     private val csb = arena.allocate(capturedStateLayout)
 
     val lib by lazy {
@@ -433,6 +490,21 @@ object Winsock2 {
         for (s in split) {
             val b = s.toLong(16)
             addr = (addr shl 8) or b
+        }
+        return addr
+    }
+
+    // Parses dotted-decimal IPv4 into a host-order Int (e.g. "127.0.0.1" -> 0x7F000001).
+    // Combined with SOCKADDR_IN.sinAddr's big-endian handle this lands as network order
+    // on the wire. Pure Kotlin, so it is unit-testable off Windows.
+    fun ipv4AddrFromString(string: String): Int {
+        val parts = string.split(".")
+        require(parts.size == 4) { "IPv4 address must have 4 octets: $string" }
+        var addr = 0
+        for (p in parts) {
+            val octet = p.toInt()
+            require(octet in 0..255) { "Octet out of range: $p" }
+            addr = (addr shl 8) or octet
         }
         return addr
     }

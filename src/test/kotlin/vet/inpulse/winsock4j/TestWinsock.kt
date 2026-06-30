@@ -6,6 +6,7 @@ import java.lang.foreign.MemorySegment
 import java.lang.foreign.ValueLayout
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.uuid.ExperimentalUuidApi
 
 @OptIn(ExperimentalUuidApi::class)
@@ -28,6 +29,41 @@ class TestWinsock {
             assertEquals(0x9b.toByte() ,guid.Data4[5], "Data4 does not match")
             assertEquals(0x34.toByte() ,guid.Data4[6], "Data4 does not match")
             assertEquals(0xfb.toByte() ,guid.Data4[7], "Data4 does not match")
+        }
+    }
+
+    @Test
+    fun testSockaddrIn() {
+        assertEquals(16L, SOCKADDR_IN.LAYOUT.byteSize(), "SOCKADDR_IN must be 16 bytes")
+
+        // ipv4AddrFromString produces host-order ints.
+        assertEquals(0x7F000001, Winsock2.ipv4AddrFromString("127.0.0.1"))
+        assertEquals(0, Winsock2.ipv4AddrFromString("0.0.0.0"))
+        assertEquals(-1, Winsock2.ipv4AddrFromString("255.255.255.255")) // 0xFFFFFFFF
+        assertFailsWith<IllegalArgumentException> { Winsock2.ipv4AddrFromString("1.2.3") }
+        assertFailsWith<IllegalArgumentException> { Winsock2.ipv4AddrFromString("1.2.3.256") }
+
+        Arena.ofConfined().use { arena ->
+            val sockaddr = SOCKADDR_IN.allocate(arena)
+            sockaddr.sinFamily = Winsock2.AF_INET.toShort()
+            sockaddr.sinPort = 8080
+            sockaddr.sinAddr = Winsock2.ipv4AddrFromString("127.0.0.1")
+
+            // Round-trip through the host-order properties.
+            assertEquals(Winsock2.AF_INET.toShort(), sockaddr.sinFamily, "sin_family")
+            assertEquals(8080, sockaddr.sinPort, "sin_port")
+            assertEquals(0x7F000001, sockaddr.sinAddr, "sin_addr")
+
+            // Verify the bytes actually on the wire are network (big-endian) order.
+            val wire = sockaddr.pointer.toArray(ValueLayout.JAVA_BYTE)
+            // sin_port at offset 2: 8080 = 0x1F90 big-endian.
+            assertEquals(0x1F.toByte(), wire[2], "sin_port byte 0")
+            assertEquals(0x90.toByte(), wire[3], "sin_port byte 1")
+            // sin_addr at offset 4: 127.0.0.1 in order.
+            assertEquals(127.toByte(), wire[4], "sin_addr byte 0")
+            assertEquals(0.toByte(), wire[5], "sin_addr byte 1")
+            assertEquals(0.toByte(), wire[6], "sin_addr byte 2")
+            assertEquals(1.toByte(), wire[7], "sin_addr byte 3")
         }
     }
 
