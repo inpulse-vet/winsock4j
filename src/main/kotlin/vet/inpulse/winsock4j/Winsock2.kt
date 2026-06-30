@@ -1,4 +1,4 @@
-package io.github.inpulse.winsock4j
+package vet.inpulse.winsock4j
 
 import java.lang.foreign.Arena
 import java.lang.foreign.FunctionDescriptor

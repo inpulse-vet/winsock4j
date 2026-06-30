@@ -15,14 +15,14 @@ This binds `ws2_32` and **only runs on Windows**. The dev/CI host is Linux, so `
 ```bash
 ./gradlew build              # compile + test
 ./gradlew test               # run tests (JUnit Platform)
-./gradlew test --tests "io.github.inpulse.winsock4j.TestWinsock.testGuidSet"   # single test
+./gradlew test --tests "vet.inpulse.winsock4j.TestWinsock.testGuidSet"   # single test
 ```
 
 Requires **JDK 25** (`jvmToolchain(25)` in `build.gradle.kts`; the foojay resolver auto-provisions it). The FFM API is final in 25 — no `--enable-preview` / `--enable-native-access` flags are wired up, so if a future JDK warns about restricted native access, that's where it would go.
 
 ## Architecture
 
-All native binding lives in `src/main/kotlin/io/github/inpulse/winsock4j/Winsock2.kt`.
+All native binding lives in `src/main/kotlin/vet/inpulse/winsock4j/Winsock2.kt`.
 
 - **`Winsock2`** (object): the entry point. Holds a global `Arena`, the `ws2_32` `SymbolLookup`, the `Linker`, and one lazily-bound `MethodHandle` per native function (`WSAStartup`, `socket`, `connect`, `send`, `recv`, `shutdown`, `closesocket`, `WSACleanup`). Each Kotlin wrapper function converts Kotlin types to/from the C ABI types and invokes its handle. Also holds the Winsock constants (`AF_BTH`, `SOCK_STREAM`, error codes, etc.) and helpers like `btAddrFromString`.
 - **Struct wrappers** (`GUID`, `SOCKADDR_BTH`, `WSADATA`): each is a `data class` wrapping a `MemorySegment`, with a companion `LAYOUT` (`MemoryLayout`), cached `VarHandle`s, and an `allocate(arena)` factory. Fields are exposed as Kotlin properties backed by the VarHandles.

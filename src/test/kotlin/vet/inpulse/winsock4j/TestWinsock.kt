@@ -1,6 +1,6 @@
-package io.github.inpulse.winsock4j
+package vet.inpulse.winsock4j
 
-import io.github.inpulse.winsock4j.Winsock2.SPP_UUID
+import vet.inpulse.winsock4j.Winsock2.SPP_UUID
 import java.lang.foreign.Arena
 import java.lang.foreign.MemorySegment
 import java.lang.foreign.ValueLayout
