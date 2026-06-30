@@ -6,6 +6,8 @@ import io.github.inpulse.io.github.inpulse.winsock4j.WSADATA
 import io.github.inpulse.io.github.inpulse.winsock4j.Winsock2
 import io.github.inpulse.io.github.inpulse.winsock4j.Winsock2.SPP_UUID
 import java.lang.foreign.Arena
+import java.lang.foreign.MemorySegment
+import java.lang.foreign.ValueLayout
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.uuid.ExperimentalUuidApi
@@ -70,15 +72,48 @@ class TestWinsock {
             sockaddr.port = 0
             sockaddr.serviceClassId = guid
 
-            val (connectRes, lastError) = Winsock2.connect(socket, sockaddr.pointer, SOCKADDR_BTH.LAYOUT.byteSize().toInt())
+            val connectRes = Winsock2.connect(socket, sockaddr.pointer, SOCKADDR_BTH.LAYOUT.byteSize().toInt())
             if (connectRes != 0) {
-//                val error = Winsock2.WSAGetLastError()
-                println("connect error: $lastError")
+                val error = Winsock2.WSAGetLastError()
+                println("connect error: $error")
             } else {
                 println("CONNECTED!")
             }
 
-            Thread.sleep(2000)
+            val getInfoMsg = arena.allocateFrom(
+                ValueLayout.JAVA_BYTE,
+                0x7e.toByte(),
+                0x00.toByte(),
+                0x05.toByte(),
+                0x15.toByte(),
+                0x98.toByte(),
+            )
+
+            val until = System.currentTimeMillis() + 50
+            val recvBuffer = arena.allocate(512)
+            while (System.currentTimeMillis() < until) {
+                val written = Winsock2.send(socket, getInfoMsg, 5, 0)
+                if (written == -1) {
+                    val error = Winsock2.WSAGetLastError()
+                    error("send: $error")
+                }
+                println("send: $written")
+
+                val received = Winsock2.recv(socket, recvBuffer, 512, 0)
+                if (received == -1) {
+                    val error = Winsock2.WSAGetLastError()
+                    error("recv: $error")
+                }
+                val recvBufferArray = ByteArray(received)
+                MemorySegment.copy(recvBuffer, ValueLayout.JAVA_BYTE, 0, recvBufferArray, 0, received)
+                println("recv: $received <-- ${recvBufferArray.toHexString()}")
+            }
+
+            val shutdown = Winsock2.shutdown(socket, Winsock2.SD_BOTH)
+            if (shutdown != 0) {
+                val error = Winsock2.WSAGetLastError()
+                println("shutdown error: $error")
+            }
 
             val close = Winsock2.closesocket(socket)
             if (close != 0) {
@@ -90,9 +125,6 @@ class TestWinsock {
                 val lastError = Winsock2.WSAGetLastError()
                 println(lastError)
             }
-
-            val ignoredError = Winsock2.WSAGetLastError()
-            println(ignoredError)
         }
     }
 

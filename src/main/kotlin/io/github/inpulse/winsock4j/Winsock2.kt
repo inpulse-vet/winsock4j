@@ -273,15 +273,25 @@ object Winsock2 {
     const val IPPROTO_ICMPV6 = 58
     const val IPPROTO_RM = 113
 
+    const val SD_RECEIVE = 0
+    const val SD_SEND = 1
+    const val SD_BOTH = 2
+
+    const val MSG_OOB = 0x1
+    const val MSG_PEEK = 0x2
+    const val MSG_DONTROUTE = 0x4
+    const val MSG_WAITALL = 0x8
+
+    private val arena = Arena.global()
+    private val linker = Linker.nativeLinker()
+    private val css = Linker.Option.captureCallState("GetLastError")
     // Layout for the struct Panama fills immediately on JVM-to-Java transition,
     // before the JVM can make any internal Windows API call that clobbers GetLastError.
     private val capturedStateLayout = Linker.Option.captureStateLayout()
     private val capturedLastErrorHandle = capturedStateLayout.varHandle(
         MemoryLayout.PathElement.groupElement("GetLastError")
     )
-
-    private val arena = Arena.global()
-    private val linker = Linker.nativeLinker()
+    private val csb = arena.allocate(capturedStateLayout)
 
     val lib by lazy {
         SymbolLookup.libraryLookup("ws2_32", arena)
@@ -294,11 +304,11 @@ object Winsock2 {
             ValueLayout.JAVA_SHORT,
             ValueLayout.ADDRESS,
         )
-        linker.downcallHandle(fn, fnDesc)
+        linker.downcallHandle(fn, fnDesc, css)
     }
 
     fun WSAStartup(version: UShort, out: WSADATA): Int {
-        return wsaStartupHandle(version.toShort(), out.pointer) as Int
+        return wsaStartupHandle(csb, version.toShort(), out.pointer) as Int
     }
 
     private val wsaCleanupHandle by lazy {
@@ -318,7 +328,7 @@ object Winsock2 {
     }
 
     fun WSAGetLastError(): Int {
-        return wsaGetLastErrorHandle() as Int
+        return capturedLastErrorHandle.get(csb, 0L) as Int
     }
 
     private val socketHandle by lazy {
@@ -329,11 +339,11 @@ object Winsock2 {
             ValueLayout.JAVA_INT,
             ValueLayout.JAVA_INT,
         )
-        linker.downcallHandle(fn, fnDesc)
+        linker.downcallHandle(fn, fnDesc, css)
     }
 
     fun socket(af: Int, type: Int, protocol: Int): UInt {
-        val ret = socketHandle(af, type, protocol) as Int
+        val ret = socketHandle(csb, af, type, protocol) as Int
         return ret.toUInt()
     }
 
@@ -343,11 +353,11 @@ object Winsock2 {
             ValueLayout.JAVA_INT,
             ValueLayout.JAVA_INT,
         )
-        linker.downcallHandle(fn, fnDesc)
+        linker.downcallHandle(fn, fnDesc, css)
     }
 
     fun closesocket(socket: UInt): Int {
-        return closesocketHandle(socket.toInt()) as Int
+        return closesocketHandle(csb, socket.toInt()) as Int
     }
 
     private val connectHandle by lazy {
@@ -361,18 +371,59 @@ object Winsock2 {
         // captureCallState prepends a leading ADDRESS (the capture buffer) to every invocation.
         // WSAGetLastError and GetLastError read the same Windows TLS slot, so "GetLastError"
         // captures the Winsock error code atomically on JVM re-entry, before anything else runs.
-        linker.downcallHandle(fn, fnDesc, Linker.Option.captureCallState("GetLastError"))
+        linker.downcallHandle(fn, fnDesc, css)
     }
 
     // Returns Pair(connectResult, wsaLastError).
     // connectResult == -1 on failure; wsaLastError is the Winsock error code (e.g. WSAECONNREFUSED).
-    fun connect(s: UInt, name: MemorySegment, namelen: Int): Pair<Int, Int> {
-        Arena.ofConfined().use { captureArena ->
-            val capturedState = captureArena.allocate(capturedStateLayout)
-            val ret = connectHandle(capturedState, s.toInt(), name, namelen) as Int
-            val wsaError = capturedLastErrorHandle.get(capturedState, 0L) as Int
-            return Pair(ret, wsaError)
-        }
+    fun connect(s: UInt, name: MemorySegment, namelen: Int): Int {
+        return connectHandle(csb, s.toInt(), name, namelen) as Int
+    }
+
+    private val shutdownHandle by lazy {
+        val fn = lib.findOrThrow("shutdown")
+        val fnDesc = FunctionDescriptor.of(
+            ValueLayout.JAVA_INT,
+            ValueLayout.JAVA_INT,
+            ValueLayout.JAVA_INT,
+        )
+        linker.downcallHandle(fn, fnDesc, css)
+    }
+
+    fun shutdown(s: UInt, how: Int): Int {
+        return shutdownHandle(csb, s.toInt(), how) as Int
+    }
+
+    private val sendHandle by lazy {
+        val fn = lib.findOrThrow("send")
+        val fnDesc = FunctionDescriptor.of(
+            ValueLayout.JAVA_INT,
+            ValueLayout.JAVA_INT,
+            ValueLayout.ADDRESS,
+            ValueLayout.JAVA_INT,
+            ValueLayout.JAVA_INT,
+        )
+        linker.downcallHandle(fn, fnDesc, css)
+    }
+
+    fun send(s: UInt, buf: MemorySegment, len: Int, flags: Int): Int {
+        return sendHandle(csb, s.toInt(), buf, len, flags) as Int
+    }
+
+    private val recvHandle by lazy {
+        val fn = lib.findOrThrow("recv")
+        val fnDesc = FunctionDescriptor.of(
+            ValueLayout.JAVA_INT,
+            ValueLayout.JAVA_INT,
+            ValueLayout.ADDRESS,
+            ValueLayout.JAVA_INT,
+            ValueLayout.JAVA_INT,
+        )
+        linker.downcallHandle(fn, fnDesc, css)
+    }
+
+    fun recv(s: UInt, buf: MemorySegment, len: Int, flags: Int): Int {
+        return recvHandle(csb, s.toInt(), buf, len, flags) as Int
     }
 
     fun btAddrFromString(string: String): Long {
