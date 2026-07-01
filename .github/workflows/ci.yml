@@ -11,9 +11,9 @@ jobs:
     # ws2_32 downcalls only resolve on Windows, so the test suite must run on a Windows host.
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: 25
