@@ -19,7 +19,7 @@ Gradle (Kotlin DSL):
 
 ```kotlin
 dependencies {
-    implementation("vet.inpulse:winsock4j:0.1.0")
+    implementation("vet.inpulse:winsock4j:0.2.0")
 }
 ```
 
@@ -29,7 +29,7 @@ Maven:
 <dependency>
     <groupId>vet.inpulse</groupId>
     <artifactId>winsock4j</artifactId>
-    <version>0.1.0</version>
+    <version>0.2.0</version>
 </dependency>
 ```
 
