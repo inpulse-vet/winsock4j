@@ -21,7 +21,14 @@ kotlin {
 }
 
 tasks.test {
-    useJUnitPlatform()
+    useJUnitPlatform {
+        // Pass -PexcludeTags=integration to skip hardware-dependent tests (e.g. in CI).
+        (project.findProperty("excludeTags") as String?)
+            ?.split(",")
+            ?.map(String::trim)
+            ?.filter(String::isNotEmpty)
+            ?.let { excludeTags(*it.toTypedArray()) }
+    }
 }
 
 mavenPublishing {
