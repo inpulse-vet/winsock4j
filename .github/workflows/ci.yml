@@ -6,6 +6,10 @@ on:
   pull_request:
     branches: [master]
 
+# Least privilege: CI only needs to read the repo. Limits what a compromised run can do.
+permissions:
+  contents: read
+
 jobs:
   test:
     # ws2_32 downcalls only resolve on Windows, so the test suite must run on a Windows host.
