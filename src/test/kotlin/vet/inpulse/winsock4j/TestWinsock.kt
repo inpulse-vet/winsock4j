@@ -1,5 +1,6 @@
 package vet.inpulse.winsock4j
 
+import org.junit.jupiter.api.Tag
 import vet.inpulse.winsock4j.Winsock2.SPP_UUID
 import java.lang.foreign.Arena
 import java.lang.foreign.MemorySegment
@@ -67,7 +68,10 @@ class TestWinsock {
         }
     }
 
+    // Connects to real Bluetooth hardware by MAC address — requires a paired SPP device,
+    // so it is excluded from CI via the "integration" tag (see build.gradle.kts / ci.yml).
     @Test
+    @Tag("integration")
     fun startup() {
         Arena.ofConfined().use { arena ->
             val wsaData = WSADATA.allocate(arena)

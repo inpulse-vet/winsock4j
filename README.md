@@ -1,5 +1,6 @@
 # winsock4j
 
+[![CI](https://github.com/inpulse-vet/winsock4j/actions/workflows/ci.yml/badge.svg)](https://github.com/inpulse-vet/winsock4j/actions/workflows/ci.yml)
 [![Publish to Maven Central](https://github.com/inpulse-vet/winsock4j/actions/workflows/publish.yml/badge.svg)](https://github.com/inpulse-vet/winsock4j/actions/workflows/publish.yml)
 [![Maven Central](https://img.shields.io/maven-central/v/vet.inpulse/winsock4j?logo=apachemaven&color=blue)](https://central.sonatype.com/artifact/vet.inpulse/winsock4j)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue)](LICENSE)

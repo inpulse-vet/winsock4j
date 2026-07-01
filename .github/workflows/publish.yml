@@ -4,13 +4,20 @@ on:
   release:
     types: [published]
 
+# Least privilege: publishing goes to Maven Central, not back to the repo.
+permissions:
+  contents: read
+
 jobs:
   publish:
     runs-on: ubuntu-latest
+    # Gate the publishing secrets behind an environment so they can be protected with
+    # required reviewers and tag restrictions (configure in Settings -> Environments).
+    environment: maven-central
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: 25

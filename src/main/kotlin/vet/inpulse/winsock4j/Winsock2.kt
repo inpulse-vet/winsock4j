@@ -294,6 +294,10 @@ object Winsock2 {
     val SPP_UUID = Uuid.parse("00001101-0000-1000-8000-00805f9b34fb")
 
     const val INVALID_SOCKET = UInt.MAX_VALUE
+    const val SOCKET_ERROR = -1
+
+    // Backlog value that lets the stack pick a reasonable maximum queue length (Winsock header value).
+    const val SOMAXCONN = 0x7fffffff
 
     const val WSAEFAULT = 10014
     const val WSAEINPROGRESS = 10036
@@ -435,6 +439,57 @@ object Winsock2 {
     // connectResult == -1 on failure; wsaLastError is the Winsock error code (e.g. WSAECONNREFUSED).
     fun connect(s: UInt, name: MemorySegment, namelen: Int): Int {
         return connectHandle(csb, s.toInt(), name, namelen) as Int
+    }
+
+    private val bindHandle by lazy {
+        val fn = lib.findOrThrow("bind")
+        val fnDesc = FunctionDescriptor.of(
+            ValueLayout.JAVA_INT,   // int return
+            ValueLayout.JAVA_INT,   // SOCKET s
+            ValueLayout.ADDRESS,    // const sockaddr *addr
+            ValueLayout.JAVA_INT,   // int namelen
+        )
+        linker.downcallHandle(fn, fnDesc, css)
+    }
+
+    // Returns 0 on success, SOCKET_ERROR (-1) on failure (check WSAGetLastError()).
+    fun bind(s: UInt, name: MemorySegment, namelen: Int): Int {
+        return bindHandle(csb, s.toInt(), name, namelen) as Int
+    }
+
+    private val listenHandle by lazy {
+        val fn = lib.findOrThrow("listen")
+        val fnDesc = FunctionDescriptor.of(
+            ValueLayout.JAVA_INT,   // int return
+            ValueLayout.JAVA_INT,   // SOCKET s
+            ValueLayout.JAVA_INT,   // int backlog
+        )
+        linker.downcallHandle(fn, fnDesc, css)
+    }
+
+    // Returns 0 on success, SOCKET_ERROR (-1) on failure. Use SOMAXCONN for backlog.
+    fun listen(s: UInt, backlog: Int): Int {
+        return listenHandle(csb, s.toInt(), backlog) as Int
+    }
+
+    private val acceptHandle by lazy {
+        val fn = lib.findOrThrow("accept")
+        val fnDesc = FunctionDescriptor.of(
+            ValueLayout.JAVA_INT,   // SOCKET return
+            ValueLayout.JAVA_INT,   // SOCKET s
+            ValueLayout.ADDRESS,    // sockaddr *addr   (may be MemorySegment.NULL)
+            ValueLayout.ADDRESS,    // int *addrlen     (may be MemorySegment.NULL)
+        )
+        linker.downcallHandle(fn, fnDesc, css)
+    }
+
+    // Returns the accepted SOCKET, or INVALID_SOCKET on failure (check WSAGetLastError()).
+    // `addr` is filled with the peer address; `addrlen` is an in/out int* that must be
+    // preset to the byte size of the addr buffer before the call. Pass MemorySegment.NULL
+    // for either when the peer address is not needed.
+    fun accept(s: UInt, addr: MemorySegment, addrlen: MemorySegment): UInt {
+        val ret = acceptHandle(csb, s.toInt(), addr, addrlen) as Int
+        return ret.toUInt()
     }
 
     private val shutdownHandle by lazy {
