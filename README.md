@@ -1,5 +1,9 @@
 # winsock4j
 
+[![Publish to Maven Central](https://github.com/inpulse-vet/winsock4j/actions/workflows/publish.yml/badge.svg)](https://github.com/inpulse-vet/winsock4j/actions/workflows/publish.yml)
+[![Maven Central](https://img.shields.io/maven-central/v/vet.inpulse/winsock4j?logo=apachemaven&color=blue)](https://central.sonatype.com/artifact/vet.inpulse/winsock4j)
+[![License](https://img.shields.io/badge/license-Apache%202.0-blue)](LICENSE)
+
 Kotlin bindings to the Windows Winsock2 (`ws2_32`) API via the Java FFM API (Project Panama,
 `java.lang.foreign`), focused on **Bluetooth RFCOMM** sockets (`AF_BTH` / `IPPROTO_RFCOMM`) — connecting
 to Bluetooth Serial Port Profile (SPP) devices and exchanging bytes over them. There is no JNI and no
@@ -14,7 +18,7 @@ Gradle (Kotlin DSL):
 
 ```kotlin
 dependencies {
-    implementation("vet.inpulse:winsock4j:1.0.0")
+    implementation("vet.inpulse:winsock4j:0.1.0")
 }
 ```
 
@@ -24,7 +28,7 @@ Maven:
 <dependency>
     <groupId>vet.inpulse</groupId>
     <artifactId>winsock4j</artifactId>
-    <version>1.0.0</version>
+    <version>0.1.0</version>
 </dependency>
 ```
 
